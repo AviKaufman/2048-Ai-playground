@@ -16,6 +16,13 @@ import type { Direction } from "@/lib/game";
 
 const BEST_KEY = "2048-best-score";
 
+// Debug mode utility
+function isDebugMode(): boolean {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  return params.get("debug") === "1";
+}
+
 type HistoryEntry = {
   tiles: Tile[];
   score: number;
@@ -56,6 +63,13 @@ export default function Home() {
   const [autoPlay, setAutoPlay] = useState(false);
   const [aiSpeed, setAiSpeed] = useState(6);
   const [aiActualSpeed, setAiActualSpeed] = useState(0);
+  const [debugInfo, setDebugInfo] = useState<{
+    boardWidth: number;
+    step: number;
+    cellSize: number;
+    gap: number;
+    padding: number;
+  } | null>(null);
   const boardRef = useRef<HTMLDivElement>(null);
   const tilesRef = useRef<Tile[]>([]);
   const gameOverRef = useRef(false);
@@ -183,19 +197,77 @@ export default function Home() {
     }
 
     const updateLayout = () => {
+      // More robust layout calculation that measures actual DOM elements
+      // instead of relying on CSS variables which may not be reliable on iOS Safari
+
+      const boardWidth = board.clientWidth;
       const styles = getComputedStyle(board);
-      const gap = Number.parseFloat(
-        styles.getPropertyValue("--board-gap"),
-      );
-      const padding = Number.parseFloat(
-        styles.getPropertyValue("--board-padding"),
-      );
-      const resolvedGap = Number.isNaN(gap) ? 12 : gap;
-      const resolvedPadding = Number.isNaN(padding) ? 16 : padding;
-      const size = board.clientWidth - resolvedPadding * 2;
-      const cellSize = (size - resolvedGap * 3) / 4;
-      const step = cellSize + resolvedGap;
+
+      // Read padding from computed styles
+      const paddingLeft = Number.parseFloat(styles.paddingLeft) || 16;
+
+      // Try to measure an actual grid cell for the most accurate size
+      const gridEl = board.querySelector('div[aria-hidden="true"]') as HTMLElement;
+      const firstCell = gridEl?.querySelector('div:first-child') as HTMLElement;
+
+      let cellSize: number;
+      let measuredGap = 12; // fallback
+
+      if (firstCell && gridEl) {
+        // Measure the actual rendered cell size (most reliable method)
+        const cellRect = firstCell.getBoundingClientRect();
+        cellSize = cellRect.width;
+
+        // Measure gap from grid styles
+        const gridStyles = getComputedStyle(gridEl);
+        const gap = Number.parseFloat(gridStyles.gap);
+        if (!Number.isNaN(gap) && gap > 0) {
+          measuredGap = gap;
+        }
+
+        if (isDebugMode()) {
+          console.log('[2048 Debug] Measured from actual cell:', {
+            cellWidth: cellRect.width,
+            cellHeight: cellRect.height,
+            gap: measuredGap,
+          });
+        }
+      } else {
+        // Fallback: calculate from board dimensions
+        const innerWidth = boardWidth - paddingLeft * 2;
+        cellSize = (innerWidth - measuredGap * 3) / 4;
+
+        if (isDebugMode()) {
+          console.log('[2048 Debug] Calculated (fallback):', {
+            boardWidth,
+            innerWidth,
+            padding: paddingLeft,
+            gap: measuredGap,
+            cellSize,
+          });
+        }
+      }
+
+      // Step is the distance from one cell origin to the next
+      const step = cellSize + measuredGap;
+
       setLayout({ cellSize, step });
+
+      // Update debug info if in debug mode
+      if (isDebugMode()) {
+        setDebugInfo({
+          boardWidth,
+          step,
+          cellSize,
+          gap: measuredGap,
+          padding: paddingLeft,
+        });
+        console.log('[2048 Debug] Final layout:', {
+          cellSize,
+          gap: measuredGap,
+          step,
+        });
+      }
     };
 
     updateLayout();
@@ -385,30 +457,76 @@ export default function Home() {
                 ))}
               </div>
               <div className={styles.tiles}>
-                {game.tiles.map((tile) => (
-                  <div
-                    key={tile.id}
-                    role="gridcell"
-                    aria-label={`${tile.value}`}
-                    className={styles.tile}
-                    style={
-                      {
-                        width: layout.cellSize,
-                        height: layout.cellSize,
-                        transform: `translate(${tile.col * layout.step}px, ${tile.row * layout.step}px)`,
-                      } as CSSProperties
-                    }
-                  >
+                {game.tiles.map((tile, idx) => {
+                  // Round to integers to avoid sub-pixel rendering issues on iOS Safari
+                  const x = Math.round(tile.col * layout.step);
+                  const y = Math.round(tile.row * layout.step);
+
+                  // Debug logging for first few tiles
+                  if (isDebugMode() && idx < 3) {
+                    console.log(`[2048 Debug] Tile ${tile.id} (value=${tile.value}): col=${tile.col}, row=${tile.row} => x=${x}px, y=${y}px`);
+                  }
+
+                  return (
                     <div
-                      className={`${styles.tileFace} ${
-                        styles[`tile${tile.value}`] ?? ""
-                      } ${mergeSet.has(tile.id) ? styles.merge : ""}`}
+                      key={tile.id}
+                      role="gridcell"
+                      aria-label={`${tile.value}`}
+                      className={styles.tile}
+                      style={
+                        {
+                          width: layout.cellSize,
+                          height: layout.cellSize,
+                          transform: `translate(${x}px, ${y}px)`,
+                        } as CSSProperties
+                      }
                     >
-                      {tile.value}
+                      <div
+                        className={`${styles.tileFace} ${
+                          styles[`tile${tile.value}`] ?? ""
+                        } ${mergeSet.has(tile.id) ? styles.merge : ""}`}
+                      >
+                        {tile.value}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
+              {/* Debug overlay - visible only with ?debug=1 query param */}
+              {isDebugMode() && debugInfo && (
+                <div className={styles.debugOverlay}>
+                  <div className={styles.debugInfo}>
+                    <strong>Debug Info:</strong>
+                    <div>Board Width: {debugInfo.boardWidth}px</div>
+                    <div>Padding: {debugInfo.padding}px</div>
+                    <div>Gap: {debugInfo.gap}px</div>
+                    <div>Cell Size: {debugInfo.cellSize.toFixed(2)}px</div>
+                    <div>Step: {debugInfo.step.toFixed(2)}px</div>
+                  </div>
+                  <div className={styles.debugGrid}>
+                    {Array.from({ length: 16 }).map((_, i) => {
+                      const col = i % 4;
+                      const row = Math.floor(i / 4);
+                      const x = Math.round(col * debugInfo.step);
+                      const y = Math.round(row * debugInfo.step);
+                      return (
+                        <div
+                          key={i}
+                          className={styles.debugCell}
+                          style={{
+                            left: `${x}px`,
+                            top: `${y}px`,
+                            width: `${debugInfo.cellSize}px`,
+                            height: `${debugInfo.cellSize}px`,
+                          }}
+                        >
+                          {col},{row}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
           <aside className={styles.aiPanel}>

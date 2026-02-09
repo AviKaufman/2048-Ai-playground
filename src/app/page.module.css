@@ -1,7 +1,10 @@
 .page {
   --topbar-height: 56px;
   position: relative;
+  /* Use 100dvh (dynamic viewport height) instead of 100vh for better iOS Safari support */
+  /* Falls back to 100vh for browsers that don't support dvh */
   min-height: 100vh;
+  min-height: 100dvh;
   padding: calc(48px + var(--topbar-height)) clamp(20px, 5vw, 64px) 40px;
   display: flex;
   flex-direction: column;
@@ -474,6 +477,55 @@
   100% {
     transform: scale(1);
   }
+}
+
+/* Debug overlay styles - visible only with ?debug=1 */
+.debugOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+}
+
+.debugInfo {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #0f0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: auto;
+  z-index: 101;
+}
+
+.debugInfo strong {
+  display: block;
+  color: #ff0;
+  margin-bottom: 4px;
+}
+
+.debugGrid {
+  position: absolute;
+  inset: var(--board-padding);
+  pointer-events: none;
+}
+
+.debugCell {
+  position: absolute;
+  border: 2px solid rgba(255, 0, 0, 0.5);
+  background: rgba(255, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  font-weight: bold;
+  color: rgba(255, 0, 0, 0.8);
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
 }
 
 @media (max-width: 900px) {
