@@ -78,6 +78,7 @@ export default function Home() {
   const aiPendingRef = useRef(false);
   const aiRequestIdRef = useRef(0);
   const lastMoveRef = useRef<number | null>(null);
+  const gameInitializedRef = useRef(false);
 
   const gridCells = useMemo(
     () => Array.from({ length: BOARD_SIZE * BOARD_SIZE }),
@@ -92,9 +93,14 @@ export default function Home() {
     }
   }, []);
 
+  // Initialize game only after layout is calculated (runs once)
   useEffect(() => {
-    setGame(createInitialState());
-  }, []);
+    if (layout.step > 0 && !gameInitializedRef.current) {
+      console.log("[2048] Layout ready, initializing game...");
+      gameInitializedRef.current = true;
+      setGame(createInitialState());
+    }
+  }, [layout.step]);
 
   useEffect(() => {
     tilesRef.current = game.tiles;
@@ -197,18 +203,30 @@ export default function Home() {
     }
 
     const updateLayout = () => {
+      console.log('[2048] updateLayout called');
+
       // More robust layout calculation that measures actual DOM elements
       // instead of relying on CSS variables which may not be reliable on iOS Safari
 
       const boardWidth = board.clientWidth;
+      console.log('[2048] Board width:', boardWidth);
+
+      if (boardWidth === 0) {
+        console.warn('[2048] Board width is 0, skipping layout calculation');
+        return;
+      }
+
       const styles = getComputedStyle(board);
 
       // Read padding from computed styles
       const paddingLeft = Number.parseFloat(styles.paddingLeft) || 16;
+      console.log('[2048] Padding:', paddingLeft);
 
       // Try to measure an actual grid cell for the most accurate size
       const gridEl = board.querySelector('div[aria-hidden="true"]') as HTMLElement;
       const firstCell = gridEl?.querySelector('div:first-child') as HTMLElement;
+
+      console.log('[2048] Found grid element:', !!gridEl, 'Found first cell:', !!firstCell);
 
       let cellSize: number;
       let measuredGap = 12; // fallback
@@ -218,6 +236,8 @@ export default function Home() {
         const cellRect = firstCell.getBoundingClientRect();
         cellSize = cellRect.width;
 
+        console.log('[2048] Measured cell size from DOM:', cellSize);
+
         // Measure gap from grid styles
         const gridStyles = getComputedStyle(gridEl);
         const gap = Number.parseFloat(gridStyles.gap);
@@ -225,31 +245,19 @@ export default function Home() {
           measuredGap = gap;
         }
 
-        if (isDebugMode()) {
-          console.log('[2048 Debug] Measured from actual cell:', {
-            cellWidth: cellRect.width,
-            cellHeight: cellRect.height,
-            gap: measuredGap,
-          });
-        }
+        console.log('[2048] Measured gap:', measuredGap);
       } else {
         // Fallback: calculate from board dimensions
         const innerWidth = boardWidth - paddingLeft * 2;
         cellSize = (innerWidth - measuredGap * 3) / 4;
 
-        if (isDebugMode()) {
-          console.log('[2048 Debug] Calculated (fallback):', {
-            boardWidth,
-            innerWidth,
-            padding: paddingLeft,
-            gap: measuredGap,
-            cellSize,
-          });
-        }
+        console.log('[2048] Calculated cell size (fallback):', cellSize, 'from innerWidth:', innerWidth);
       }
 
       // Step is the distance from one cell origin to the next
       const step = cellSize + measuredGap;
+
+      console.log('[2048] Final layout - cellSize:', cellSize, 'step:', step);
 
       setLayout({ cellSize, step });
 
@@ -262,18 +270,21 @@ export default function Home() {
           gap: measuredGap,
           padding: paddingLeft,
         });
-        console.log('[2048 Debug] Final layout:', {
-          cellSize,
-          gap: measuredGap,
-          step,
-        });
       }
     };
 
-    updateLayout();
+    // Give the DOM time to render before measuring (especially important on iOS)
+    const timeoutId = setTimeout(() => {
+      updateLayout();
+    }, 0);
+
     const observer = new ResizeObserver(updateLayout);
     observer.observe(board);
-    return () => observer.disconnect();
+
+    return () => {
+      clearTimeout(timeoutId);
+      observer.disconnect();
+    };
   }, []);
 
   useEffect(() => {
@@ -457,40 +468,45 @@ export default function Home() {
                 ))}
               </div>
               <div className={styles.tiles}>
-                {game.tiles.map((tile, idx) => {
-                  // Round to integers to avoid sub-pixel rendering issues on iOS Safari
-                  const x = Math.round(tile.col * layout.step);
-                  const y = Math.round(tile.row * layout.step);
+                {layout.step > 0 ? (
+                  game.tiles.map((tile, idx) => {
+                    // Round to integers to avoid sub-pixel rendering issues on iOS Safari
+                    const x = Math.round(tile.col * layout.step);
+                    const y = Math.round(tile.row * layout.step);
 
-                  // Debug logging for first few tiles
-                  if (isDebugMode() && idx < 3) {
-                    console.log(`[2048 Debug] Tile ${tile.id} (value=${tile.value}): col=${tile.col}, row=${tile.row} => x=${x}px, y=${y}px`);
-                  }
+                    // Debug logging for first few tiles
+                    if (isDebugMode() && idx < 3) {
+                      console.log(`[2048 Debug] Tile ${tile.id} (value=${tile.value}): col=${tile.col}, row=${tile.row} => x=${x}px, y=${y}px (step=${layout.step})`);
+                    }
 
-                  return (
-                    <div
-                      key={tile.id}
-                      role="gridcell"
-                      aria-label={`${tile.value}`}
-                      className={styles.tile}
-                      style={
-                        {
-                          width: layout.cellSize,
-                          height: layout.cellSize,
-                          transform: `translate(${x}px, ${y}px)`,
-                        } as CSSProperties
-                      }
-                    >
+                    return (
                       <div
-                        className={`${styles.tileFace} ${
-                          styles[`tile${tile.value}`] ?? ""
-                        } ${mergeSet.has(tile.id) ? styles.merge : ""}`}
+                        key={tile.id}
+                        role="gridcell"
+                        aria-label={`${tile.value}`}
+                        className={styles.tile}
+                        style={
+                          {
+                            width: layout.cellSize,
+                            height: layout.cellSize,
+                            transform: `translate(${x}px, ${y}px)`,
+                          } as CSSProperties
+                        }
                       >
-                        {tile.value}
+                        <div
+                          className={`${styles.tileFace} ${
+                            styles[`tile${tile.value}`] ?? ""
+                          } ${mergeSet.has(tile.id) ? styles.merge : ""}`}
+                        >
+                          {tile.value}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                ) : (
+                  // Loading state - don't render tiles until layout is calculated
+                  <div style={{ display: 'none' }}>Loading...</div>
+                )}
               </div>
               {/* Debug overlay - visible only with ?debug=1 query param */}
               {isDebugMode() && debugInfo && (
